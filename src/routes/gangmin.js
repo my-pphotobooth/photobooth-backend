@@ -1,0 +1,327 @@
+import { Router } from 'express'
+import { nanoid } from 'nanoid'
+import { query } from '../db/pool.js'
+
+export const gangminRouter = Router()
+
+const HEX_RE = /^#[0-9a-fA-F]{6}$/
+
+function badRequest(res, message) {
+  return res.status(400).json({ error: message })
+}
+
+function notFound(res) {
+  return res.status(404).json({ error: 'not found' })
+}
+
+function isString(v, { maxLength = 200, minLength = 1 } = {}) {
+  return typeof v === 'string' && v.length >= minLength && v.length <= maxLength
+}
+
+function parseDateOrNull(v) {
+  if (v === null || v === undefined || v === '') return null
+  const t = Date.parse(v)
+  if (Number.isNaN(t)) throw new Error('invalid date')
+  return new Date(t).toISOString()
+}
+
+function toCategoryDto(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at?.toISOString() ?? null,
+    updatedAt: row.updated_at?.toISOString() ?? null,
+  }
+}
+
+function toFrameDto(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    categoryId: row.category_id,
+    backgroundColor: row.background_color,
+    textColor: row.text_color,
+    slotColor: row.slot_color,
+    footerText: row.footer_text,
+    overlays: row.overlays,
+    availableFrom: row.available_from?.toISOString() ?? null,
+    availableUntil: row.available_until?.toISOString() ?? null,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at?.toISOString() ?? null,
+    updatedAt: row.updated_at?.toISOString() ?? null,
+  }
+}
+
+// ----- Categories -----
+
+gangminRouter.get('/frame-categories', async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, name, sort_order, created_at, updated_at
+       FROM frame_categories
+       ORDER BY sort_order ASC, name ASC`,
+    )
+    res.json({ items: rows.map(toCategoryDto) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.post('/frame-categories', async (req, res, next) => {
+  try {
+    const { name, sortOrder } = req.body ?? {}
+    if (!isString(name)) return badRequest(res, 'name is required')
+    const id = nanoid()
+    const sortOrderNum = Number.isFinite(sortOrder) ? sortOrder : 0
+
+    const { rows } = await query(
+      `INSERT INTO frame_categories (id, name, sort_order)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, sort_order, created_at, updated_at`,
+      [id, name.trim(), sortOrderNum],
+    )
+    res.status(201).json(toCategoryDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.patch('/frame-categories/:id', async (req, res, next) => {
+  try {
+    const { name, sortOrder } = req.body ?? {}
+    const sets = []
+    const params = []
+    if (name !== undefined) {
+      if (!isString(name)) return badRequest(res, 'invalid name')
+      params.push(name.trim())
+      sets.push(`name = $${params.length}`)
+    }
+    if (sortOrder !== undefined) {
+      if (!Number.isFinite(sortOrder)) return badRequest(res, 'invalid sortOrder')
+      params.push(sortOrder)
+      sets.push(`sort_order = $${params.length}`)
+    }
+    if (sets.length === 0) return badRequest(res, 'no fields to update')
+    sets.push('updated_at = now()')
+    params.push(req.params.id)
+
+    const { rows } = await query(
+      `UPDATE frame_categories
+       SET ${sets.join(', ')}
+       WHERE id = $${params.length}
+       RETURNING id, name, sort_order, created_at, updated_at`,
+      params,
+    )
+    if (rows.length === 0) return notFound(res)
+    res.json(toCategoryDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.delete('/frame-categories/:id', async (req, res, next) => {
+  try {
+    const { rowCount } = await query(
+      `DELETE FROM frame_categories WHERE id = $1`,
+      [req.params.id],
+    )
+    if (rowCount === 0) return notFound(res)
+    res.status(204).end()
+  } catch (err) {
+    if (err.code === '23503') {
+      return res
+        .status(409)
+        .json({ error: 'category has frames; remove or move them first' })
+    }
+    next(err)
+  }
+})
+
+// ----- Frames -----
+
+gangminRouter.get('/frames', async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, name, category_id, background_color, text_color, slot_color,
+              footer_text, overlays, available_from, available_until, sort_order, created_at, updated_at
+       FROM frames
+       ORDER BY sort_order ASC, name ASC`,
+    )
+    res.json({ items: rows.map(toFrameDto) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.get('/frames/:id', async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, name, category_id, background_color, text_color, slot_color,
+              footer_text, overlays, available_from, available_until, sort_order, created_at, updated_at
+       FROM frames
+       WHERE id = $1`,
+      [req.params.id],
+    )
+    if (rows.length === 0) return notFound(res)
+    res.json(toFrameDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.post('/frames', async (req, res, next) => {
+  try {
+    const data = req.body ?? {}
+    const v = validateFrame(data, { partial: false })
+    if (v.error) return badRequest(res, v.error)
+    const id = nanoid()
+
+    const { rows } = await query(
+      `INSERT INTO frames (
+         id, name, category_id, background_color, text_color, slot_color, footer_text,
+         overlays, available_from, available_until, sort_order
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, name, category_id, background_color, text_color, slot_color,
+                 footer_text, overlays, available_from, available_until, sort_order, created_at, updated_at`,
+      [
+        id,
+        data.name.trim(),
+        data.categoryId,
+        data.backgroundColor,
+        data.textColor,
+        data.slotColor,
+        data.footerText,
+        data.overlays ?? null,
+        v.availableFrom,
+        v.availableUntil,
+        Number.isFinite(data.sortOrder) ? data.sortOrder : 0,
+      ],
+    )
+    res.status(201).json(toFrameDto(rows[0]))
+  } catch (err) {
+    if (err.code === '23503') {
+      return badRequest(res, 'invalid categoryId')
+    }
+    next(err)
+  }
+})
+
+gangminRouter.patch('/frames/:id', async (req, res, next) => {
+  try {
+    const data = req.body ?? {}
+    const v = validateFrame(data, { partial: true })
+    if (v.error) return badRequest(res, v.error)
+
+    const sets = []
+    const params = []
+    function add(col, val) {
+      params.push(val)
+      sets.push(`${col} = $${params.length}`)
+    }
+    if (data.name !== undefined) add('name', data.name.trim())
+    if (data.categoryId !== undefined) add('category_id', data.categoryId)
+    if (data.backgroundColor !== undefined) add('background_color', data.backgroundColor)
+    if (data.textColor !== undefined) add('text_color', data.textColor)
+    if (data.slotColor !== undefined) add('slot_color', data.slotColor)
+    if (data.footerText !== undefined) add('footer_text', data.footerText)
+    if (data.overlays !== undefined) add('overlays', data.overlays)
+    if (data.availableFrom !== undefined) add('available_from', v.availableFrom)
+    if (data.availableUntil !== undefined) add('available_until', v.availableUntil)
+    if (data.sortOrder !== undefined) add('sort_order', data.sortOrder)
+    if (sets.length === 0) return badRequest(res, 'no fields to update')
+    sets.push('updated_at = now()')
+    params.push(req.params.id)
+
+    const { rows } = await query(
+      `UPDATE frames
+       SET ${sets.join(', ')}
+       WHERE id = $${params.length}
+       RETURNING id, name, category_id, background_color, text_color, slot_color,
+                 footer_text, overlays, available_from, available_until, sort_order, created_at, updated_at`,
+      params,
+    )
+    if (rows.length === 0) return notFound(res)
+    res.json(toFrameDto(rows[0]))
+  } catch (err) {
+    if (err.code === '23503') {
+      return badRequest(res, 'invalid categoryId')
+    }
+    next(err)
+  }
+})
+
+gangminRouter.delete('/frames/:id', async (req, res, next) => {
+  try {
+    const { rowCount } = await query(
+      `DELETE FROM frames WHERE id = $1`,
+      [req.params.id],
+    )
+    if (rowCount === 0) return notFound(res)
+    res.status(204).end()
+  } catch (err) {
+    next(err)
+  }
+})
+
+function validateFrame(data, { partial }) {
+  const required = [
+    'name',
+    'categoryId',
+    'backgroundColor',
+    'textColor',
+    'slotColor',
+    'footerText',
+  ]
+  if (!partial) {
+    for (const k of required) {
+      if (data[k] === undefined) return { error: `${k} is required` }
+    }
+  }
+  if (data.name !== undefined && !isString(data.name)) {
+    return { error: 'invalid name' }
+  }
+  if (data.categoryId !== undefined && !isString(data.categoryId)) {
+    return { error: 'invalid categoryId' }
+  }
+  if (data.backgroundColor !== undefined && !HEX_RE.test(data.backgroundColor)) {
+    return { error: 'backgroundColor must be #RRGGBB' }
+  }
+  if (data.textColor !== undefined && !HEX_RE.test(data.textColor)) {
+    return { error: 'textColor must be #RRGGBB' }
+  }
+  if (data.slotColor !== undefined && !HEX_RE.test(data.slotColor)) {
+    return { error: 'slotColor must be #RRGGBB' }
+  }
+  if (
+    data.footerText !== undefined &&
+    (typeof data.footerText !== 'string' || data.footerText.length > 200)
+  ) {
+    return { error: 'invalid footerText' }
+  }
+  if (data.sortOrder !== undefined && !Number.isFinite(data.sortOrder)) {
+    return { error: 'invalid sortOrder' }
+  }
+  if (
+    data.overlays !== undefined &&
+    data.overlays !== null &&
+    !Array.isArray(data.overlays)
+  ) {
+    return { error: 'overlays must be an array or null' }
+  }
+
+  let availableFrom = null
+  let availableUntil = null
+  try {
+    if (data.availableFrom !== undefined) {
+      availableFrom = parseDateOrNull(data.availableFrom)
+    }
+    if (data.availableUntil !== undefined) {
+      availableUntil = parseDateOrNull(data.availableUntil)
+    }
+  } catch {
+    return { error: 'invalid date' }
+  }
+  return { availableFrom, availableUntil }
+}

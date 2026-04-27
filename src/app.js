@@ -12,6 +12,8 @@ import { query } from './db/pool.js'
 export function createApp() {
   const app = express()
 
+  app.set('trust proxy', 1)
+
   app.use(cors({ origin: config.corsOrigin }))
   app.use(express.json())
 

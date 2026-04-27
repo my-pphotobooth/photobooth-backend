@@ -41,6 +41,13 @@ export function createApp() {
     legacyHeaders: false,
   })
 
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  })
+
   app.use('/api/photos', (req, res, next) => {
     if (req.method === 'POST') return uploadLimiter(req, res, next)
     next()
@@ -48,6 +55,7 @@ export function createApp() {
   app.use('/api/photos', photosRouter)
   app.use('/api/frames', framesRouter)
   app.use('/api/frame-categories', frameCategoriesRouter)
+  app.use('/api/gangmin/login', loginLimiter)
   app.use('/api/gangmin', gangminRouter)
 
   app.use(errorHandler)

@@ -14,6 +14,8 @@ export const config = {
   maxFileSizeBytes: Number(process.env.MAX_FILE_SIZE_BYTES ?? 5 * 1024 * 1024),
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   storageDriver: process.env.STORAGE_DRIVER ?? 'local',
+  adminPassword: process.env.ADMIN_PASSWORD ?? null,
+  jwtSecret: process.env.JWT_SECRET ?? null,
   aws: {
     region: process.env.AWS_REGION ?? 'ap-northeast-2',
     s3Bucket: process.env.S3_BUCKET ?? null,

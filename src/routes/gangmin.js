@@ -1,13 +1,31 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { Router } from 'express'
+import jwt from 'jsonwebtoken'
 import { nanoid } from 'nanoid'
 import { config } from '../config.js'
 import { query } from '../db/pool.js'
 import { storage } from '../storage/index.js'
 import { upload } from '../middleware/upload.js'
+import { requireAdmin } from '../middleware/requireAdmin.js'
 
 export const gangminRouter = Router()
+
+gangminRouter.post('/login', async (req, res) => {
+  const { password } = req.body ?? {}
+  if (!config.adminPassword || !config.jwtSecret) {
+    return res.status(500).json({ error: 'admin auth not configured' })
+  }
+  if (typeof password !== 'string' || password !== config.adminPassword) {
+    return res.status(401).json({ error: 'invalid password' })
+  }
+  const token = jwt.sign({ role: 'admin' }, config.jwtSecret, {
+    expiresIn: '7d',
+  })
+  res.json({ token })
+})
+
+gangminRouter.use(requireAdmin)
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
 

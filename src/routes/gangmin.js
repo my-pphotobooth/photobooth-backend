@@ -1,5 +1,8 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { Router } from 'express'
 import { nanoid } from 'nanoid'
+import { config } from '../config.js'
 import { query } from '../db/pool.js'
 import { storage } from '../storage/index.js'
 import { upload } from '../middleware/upload.js'
@@ -270,6 +273,42 @@ gangminRouter.delete('/frames/:id', async (req, res, next) => {
 })
 
 // ----- Uploads -----
+
+gangminRouter.post('/cleanup-uploads', async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT overlays FROM frames WHERE overlays IS NOT NULL`,
+    )
+
+    const used = new Set()
+    for (const row of rows) {
+      if (!Array.isArray(row.overlays)) continue
+      for (const o of row.overlays) {
+        if (typeof o?.src !== 'string') continue
+        const m = o.src.match(/\/uploads\/(.+)$/)
+        if (m) used.add(m[1])
+      }
+    }
+
+    const overlaysDir = path.join(config.uploadDir, 'overlays')
+    let allFiles = []
+    try {
+      const entries = await fs.readdir(overlaysDir)
+      allFiles = entries.map((f) => `overlays/${f}`)
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err
+    }
+
+    const orphans = allFiles.filter((f) => !used.has(f))
+    for (const f of orphans) {
+      await storage.delete(f)
+    }
+
+    res.json({ deleted: orphans.length, kept: used.size })
+  } catch (err) {
+    next(err)
+  }
+})
 
 gangminRouter.post('/uploads', upload.single('file'), async (req, res, next) => {
   try {

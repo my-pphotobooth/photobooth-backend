@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:18
+    container_name: photobooth-db
+    environment:
+      POSTGRES_USER: photobooth
+      POSTGRES_PASSWORD: photobooth
+      POSTGRES_DB: photobooth
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -8,16 +8,18 @@ const EXT_BY_MIME = {
   'image/jpeg': 'jpg',
 }
 
-async function ensureDir() {
-  await fs.mkdir(config.uploadDir, { recursive: true })
-}
-
 export const localStorage = {
-  async put(buffer, { mimeType }) {
-    await ensureDir()
+  async put(buffer, { mimeType, prefix } = {}) {
     const ext = EXT_BY_MIME[mimeType]
     if (!ext) throw new Error(`unsupported mime type: ${mimeType}`)
-    const filename = `${nanoid()}.${ext}`
+    const baseName = `${nanoid()}.${ext}`
+    const filename = prefix ? `${prefix}/${baseName}` : baseName
+
+    const dir = prefix
+      ? path.join(config.uploadDir, prefix)
+      : config.uploadDir
+    await fs.mkdir(dir, { recursive: true })
+
     const fullPath = path.join(config.uploadDir, filename)
     await fs.writeFile(fullPath, buffer)
     return { filename, sizeBytes: buffer.length }

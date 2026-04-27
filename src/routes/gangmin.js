@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { nanoid } from 'nanoid'
 import { query } from '../db/pool.js'
+import { storage } from '../storage/index.js'
+import { upload } from '../middleware/upload.js'
 
 export const gangminRouter = Router()
 
@@ -193,7 +195,7 @@ gangminRouter.post('/frames', async (req, res, next) => {
         data.textColor,
         data.slotColor,
         data.footerText,
-        data.overlays ?? null,
+        data.overlays ? JSON.stringify(data.overlays) : null,
         v.availableFrom,
         v.availableUntil,
         Number.isFinite(data.sortOrder) ? data.sortOrder : 0,
@@ -226,7 +228,9 @@ gangminRouter.patch('/frames/:id', async (req, res, next) => {
     if (data.textColor !== undefined) add('text_color', data.textColor)
     if (data.slotColor !== undefined) add('slot_color', data.slotColor)
     if (data.footerText !== undefined) add('footer_text', data.footerText)
-    if (data.overlays !== undefined) add('overlays', data.overlays)
+    if (data.overlays !== undefined) {
+      add('overlays', data.overlays === null ? null : JSON.stringify(data.overlays))
+    }
     if (data.availableFrom !== undefined) add('available_from', v.availableFrom)
     if (data.availableUntil !== undefined) add('available_until', v.availableUntil)
     if (data.sortOrder !== undefined) add('sort_order', data.sortOrder)
@@ -260,6 +264,21 @@ gangminRouter.delete('/frames/:id', async (req, res, next) => {
     )
     if (rowCount === 0) return notFound(res)
     res.status(204).end()
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ----- Uploads -----
+
+gangminRouter.post('/uploads', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return badRequest(res, 'file is required')
+    const { filename } = await storage.put(req.file.buffer, {
+      mimeType: req.file.mimetype,
+      prefix: 'overlays',
+    })
+    res.status(201).json({ url: storage.getUrl(filename) })
   } catch (err) {
     next(err)
   }
@@ -303,12 +322,24 @@ function validateFrame(data, { partial }) {
   if (data.sortOrder !== undefined && !Number.isFinite(data.sortOrder)) {
     return { error: 'invalid sortOrder' }
   }
-  if (
-    data.overlays !== undefined &&
-    data.overlays !== null &&
-    !Array.isArray(data.overlays)
-  ) {
-    return { error: 'overlays must be an array or null' }
+  if (data.overlays !== undefined && data.overlays !== null) {
+    if (!Array.isArray(data.overlays)) {
+      return { error: 'overlays must be an array or null' }
+    }
+    for (let i = 0; i < data.overlays.length; i++) {
+      const o = data.overlays[i]
+      if (!o || typeof o !== 'object') {
+        return { error: `overlay[${i}] must be an object` }
+      }
+      if (typeof o.src !== 'string' || o.src.length === 0) {
+        return { error: `overlay[${i}].src must be a non-empty string` }
+      }
+      for (const k of ['right', 'bottom', 'height']) {
+        if (typeof o[k] !== 'number' || o[k] < 0 || o[k] > 1) {
+          return { error: `overlay[${i}].${k} must be a number 0..1` }
+        }
+      }
+    }
   }
 
   let availableFrom = null

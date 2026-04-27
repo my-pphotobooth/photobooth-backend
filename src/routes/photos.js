@@ -17,20 +17,28 @@ function toDto(row) {
 photosRouter.post('/', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' })
+    const frameId = req.body?.frameId || null
 
     const { filename, sizeBytes } = await storage.put(req.file.buffer, {
       mimeType: req.file.mimetype,
     })
     const id = nanoid()
 
-    const { rows } = await query(
-      `INSERT INTO photos (id, filename, mime_type, size_bytes)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, filename, created_at`,
-      [id, filename, req.file.mimetype, sizeBytes],
-    )
-
-    res.status(201).json(toDto(rows[0]))
+    try {
+      const { rows } = await query(
+        `INSERT INTO photos (id, filename, mime_type, size_bytes, frame_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, filename, created_at`,
+        [id, filename, req.file.mimetype, sizeBytes, frameId],
+      )
+      res.status(201).json(toDto(rows[0]))
+    } catch (err) {
+      if (err.code === '23503') {
+        await storage.delete(filename)
+        return res.status(400).json({ error: 'invalid frameId' })
+      }
+      throw err
+    }
   } catch (err) {
     next(err)
   }

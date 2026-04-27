@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit'
 import path from 'node:path'
 import { config } from './config.js'
 import { photosRouter } from './routes/photos.js'
+import { framesRouter, frameCategoriesRouter } from './routes/frames.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { query } from './db/pool.js'
 
@@ -42,6 +43,8 @@ export function createApp() {
     next()
   })
   app.use('/api/photos', photosRouter)
+  app.use('/api/frames', framesRouter)
+  app.use('/api/frame-categories', frameCategoriesRouter)
 
   app.use(errorHandler)
 

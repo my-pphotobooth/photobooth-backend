@@ -652,8 +652,8 @@ function validateFrame(data, { partial }) {
         return { error: `overlay[${i}].src must be a non-empty string` }
       }
       for (const k of ['right', 'bottom', 'height']) {
-        if (typeof o[k] !== 'number' || o[k] < 0 || o[k] > 1) {
-          return { error: `overlay[${i}].${k} must be a number 0..1` }
+        if (typeof o[k] !== 'number' || !Number.isFinite(o[k])) {
+          return { error: `overlay[${i}].${k} must be a finite number` }
         }
       }
     }

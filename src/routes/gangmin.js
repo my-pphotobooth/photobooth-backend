@@ -422,27 +422,49 @@ gangminRouter.post('/tapes', upload.single('file'), async (req, res, next) => {
   }
 })
 
-gangminRouter.patch('/tapes/:id', async (req, res, next) => {
+gangminRouter.patch('/tapes/:id', upload.single('file'), async (req, res, next) => {
+  let newFilename = null
   try {
     const { name, sortOrder, active } = req.body ?? {}
     const sets = []
     const params = []
+
     if (name !== undefined) {
       if (!isString(name)) return badRequest(res, 'invalid name')
       params.push(name.trim())
       sets.push(`name = $${params.length}`)
     }
     if (sortOrder !== undefined) {
-      if (!Number.isFinite(sortOrder)) return badRequest(res, 'invalid sortOrder')
-      params.push(sortOrder)
+      const n = Number(sortOrder)
+      if (!Number.isFinite(n)) return badRequest(res, 'invalid sortOrder')
+      params.push(n)
       sets.push(`sort_order = $${params.length}`)
     }
     if (active !== undefined) {
-      if (typeof active !== 'boolean') return badRequest(res, 'invalid active')
-      params.push(active)
+      const b = typeof active === 'boolean' ? active : active === 'true'
+      params.push(b)
       sets.push(`active = $${params.length}`)
     }
+
+    if (req.file) {
+      const result = await storage.put(req.file.buffer, {
+        mimeType: req.file.mimetype,
+        prefix: 'tapes',
+      })
+      newFilename = result.filename
+      params.push(newFilename)
+      sets.push(`filename = $${params.length}`)
+    }
+
     if (sets.length === 0) return badRequest(res, 'no fields to update')
+
+    // 기존 파일명 미리 조회 (이미지 교체 시 삭제용)
+    let oldFilename = null
+    if (newFilename) {
+      const old = await query('SELECT filename FROM tapes WHERE id = $1', [req.params.id])
+      oldFilename = old.rows[0]?.filename ?? null
+    }
+
     sets.push('updated_at = now()')
     params.push(req.params.id)
 
@@ -453,9 +475,24 @@ gangminRouter.patch('/tapes/:id', async (req, res, next) => {
        RETURNING id, name, filename, active, sort_order, created_at, updated_at`,
       params,
     )
-    if (rows.length === 0) return notFound(res)
+    if (rows.length === 0) {
+      if (newFilename) await storage.delete(newFilename)
+      return notFound(res)
+    }
+
+    if (oldFilename && oldFilename !== rows[0].filename) {
+      try {
+        await storage.delete(oldFilename)
+      } catch (err) {
+        console.warn('failed to delete old tape file:', err.message)
+      }
+    }
+
     res.json(toTapeDto(rows[0]))
   } catch (err) {
+    if (newFilename) {
+      try { await storage.delete(newFilename) } catch { /* ignore */ }
+    }
     next(err)
   }
 })

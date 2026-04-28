@@ -106,17 +106,3 @@ photosRouter.get('/:id', async (req, res, next) => {
   }
 })
 
-photosRouter.delete('/:id', async (req, res, next) => {
-  try {
-    const { rowCount } = await query(
-      `UPDATE photos
-       SET deleted_at = now()
-       WHERE id = $1 AND deleted_at IS NULL`,
-      [req.params.id],
-    )
-    if (rowCount === 0) return res.status(404).json({ error: 'not found' })
-    res.status(204).end()
-  } catch (err) {
-    next(err)
-  }
-})

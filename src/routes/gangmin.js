@@ -290,6 +290,77 @@ gangminRouter.delete('/frames/:id', async (req, res, next) => {
   }
 })
 
+// ----- Photos (어드민 조회·삭제) -----
+
+function toPhotoDto(row) {
+  return {
+    id: row.id,
+    url: storage.getUrl(row.filename),
+    createdAt: row.created_at?.toISOString() ?? null,
+    frameId: row.frame_id,
+    frameName: row.frame_name,
+    tape:
+      row.tape_id && row.tape_filename
+        ? {
+            id: row.tape_id,
+            name: row.tape_name,
+            url: storage.getUrl(row.tape_filename),
+          }
+        : null,
+  }
+}
+
+gangminRouter.get('/photos', async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 24, 100)
+    const cursor = req.query.cursor
+
+    const params = []
+    let where = 'WHERE p.deleted_at IS NULL'
+    if (cursor) {
+      params.push(cursor)
+      where += ` AND p.created_at < $${params.length}`
+    }
+    params.push(limit + 1)
+
+    const { rows } = await query(
+      `SELECT p.id, p.filename, p.created_at,
+              p.frame_id, f.name AS frame_name,
+              p.tape_id, t.name AS tape_name, t.filename AS tape_filename
+       FROM photos p
+       LEFT JOIN frames f ON f.id = p.frame_id
+       LEFT JOIN tapes t ON t.id = p.tape_id
+       ${where}
+       ORDER BY p.created_at DESC
+       LIMIT $${params.length}`,
+      params,
+    )
+
+    const hasMore = rows.length > limit
+    const items = (hasMore ? rows.slice(0, limit) : rows).map(toPhotoDto)
+    const nextCursor = hasMore ? rows[limit - 1].created_at.toISOString() : null
+
+    res.json({ items, nextCursor })
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.delete('/photos/:id', async (req, res, next) => {
+  try {
+    const { rowCount } = await query(
+      `UPDATE photos
+       SET deleted_at = now()
+       WHERE id = $1 AND deleted_at IS NULL`,
+      [req.params.id],
+    )
+    if (rowCount === 0) return notFound(res)
+    res.status(204).end()
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ----- Tapes -----
 
 function toTapeDto(row) {

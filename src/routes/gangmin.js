@@ -346,6 +346,40 @@ gangminRouter.get('/photos', async (req, res, next) => {
   }
 })
 
+gangminRouter.patch('/photos/:id', async (req, res, next) => {
+  try {
+    const data = req.body ?? {}
+    if (!('tapeId' in data)) return badRequest(res, 'no fields to update')
+    const tapeId = data.tapeId
+    if (tapeId !== null && !isString(tapeId)) {
+      return badRequest(res, 'invalid tapeId')
+    }
+
+    const updated = await query(
+      `UPDATE photos SET tape_id = $1
+       WHERE id = $2 AND deleted_at IS NULL
+       RETURNING id`,
+      [tapeId, req.params.id],
+    )
+    if (updated.rows.length === 0) return notFound(res)
+
+    const { rows } = await query(
+      `SELECT p.id, p.filename, p.created_at,
+              p.frame_id, f.name AS frame_name,
+              p.tape_id, t.name AS tape_name, t.filename AS tape_filename
+       FROM photos p
+       LEFT JOIN frames f ON f.id = p.frame_id
+       LEFT JOIN tapes t ON t.id = p.tape_id
+       WHERE p.id = $1`,
+      [req.params.id],
+    )
+    res.json(toPhotoDto(rows[0]))
+  } catch (err) {
+    if (err.code === '23503') return badRequest(res, 'invalid tapeId')
+    next(err)
+  }
+})
+
 gangminRouter.delete('/photos/:id', async (req, res, next) => {
   try {
     const { rowCount } = await query(

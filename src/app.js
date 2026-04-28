@@ -5,6 +5,7 @@ import path from 'node:path'
 import { config } from './config.js'
 import { photosRouter } from './routes/photos.js'
 import { framesRouter, frameCategoriesRouter } from './routes/frames.js'
+import { tapesRouter } from './routes/tapes.js'
 import { gangminRouter } from './routes/gangmin.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { query } from './db/pool.js'
@@ -55,6 +56,7 @@ export function createApp() {
   app.use('/api/photos', photosRouter)
   app.use('/api/frames', framesRouter)
   app.use('/api/frame-categories', frameCategoriesRouter)
+  app.use('/api/tapes', tapesRouter)
   app.use('/api/gangmin/login', loginLimiter)
   app.use('/api/gangmin', gangminRouter)
 

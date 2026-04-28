@@ -7,10 +7,19 @@ import { upload } from '../middleware/upload.js'
 export const photosRouter = Router()
 
 function toDto(row) {
+  const tape =
+    row.tape_id && row.tape_filename
+      ? {
+          id: row.tape_id,
+          name: row.tape_name,
+          url: storage.getUrl(row.tape_filename),
+        }
+      : null
   return {
     id: row.id,
     url: storage.getUrl(row.filename),
     createdAt: row.created_at.toISOString(),
+    tape,
   }
 }
 
@@ -18,6 +27,7 @@ photosRouter.post('/', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' })
     const frameId = req.body?.frameId || null
+    const tapeId = req.body?.tapeId || null
 
     const { filename, sizeBytes } = await storage.put(req.file.buffer, {
       mimeType: req.file.mimetype,
@@ -26,16 +36,17 @@ photosRouter.post('/', upload.single('file'), async (req, res, next) => {
 
     try {
       const { rows } = await query(
-        `INSERT INTO photos (id, filename, mime_type, size_bytes, frame_id)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, filename, created_at`,
-        [id, filename, req.file.mimetype, sizeBytes, frameId],
+        `INSERT INTO photos (id, filename, mime_type, size_bytes, frame_id, tape_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, filename, created_at, tape_id,
+                   NULL::text AS tape_name, NULL::text AS tape_filename`,
+        [id, filename, req.file.mimetype, sizeBytes, frameId, tapeId],
       )
       res.status(201).json(toDto(rows[0]))
     } catch (err) {
       if (err.code === '23503') {
         await storage.delete(filename)
-        return res.status(400).json({ error: 'invalid frameId' })
+        return res.status(400).json({ error: 'invalid frameId or tapeId' })
       }
       throw err
     }
@@ -50,18 +61,20 @@ photosRouter.get('/', async (req, res, next) => {
     const cursor = req.query.cursor
 
     const params = []
-    let where = 'WHERE deleted_at IS NULL'
+    let where = 'WHERE p.deleted_at IS NULL'
     if (cursor) {
       params.push(cursor)
-      where += ` AND created_at < $${params.length}`
+      where += ` AND p.created_at < $${params.length}`
     }
     params.push(limit + 1)
 
     const { rows } = await query(
-      `SELECT id, filename, created_at
-       FROM photos
+      `SELECT p.id, p.filename, p.created_at,
+              p.tape_id, t.name AS tape_name, t.filename AS tape_filename
+       FROM photos p
+       LEFT JOIN tapes t ON t.id = p.tape_id
        ${where}
-       ORDER BY created_at DESC
+       ORDER BY p.created_at DESC
        LIMIT $${params.length}`,
       params,
     )
@@ -79,9 +92,11 @@ photosRouter.get('/', async (req, res, next) => {
 photosRouter.get('/:id', async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT id, filename, created_at
-       FROM photos
-       WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT p.id, p.filename, p.created_at,
+              p.tape_id, t.name AS tape_name, t.filename AS tape_filename
+       FROM photos p
+       LEFT JOIN tapes t ON t.id = p.tape_id
+       WHERE p.id = $1 AND p.deleted_at IS NULL`,
       [req.params.id],
     )
     if (rows.length === 0) return res.status(404).json({ error: 'not found' })

@@ -14,6 +14,7 @@ export const gangminRouter = Router()
 // layout을 명시하지 않고 만든 프레임의 기본 규격(600x1900, 4슬롯).
 const DEFAULT_LAYOUT = {
   canvas: { width: 600, height: 1900 },
+  shotCount: 8,
   slots: [
     { x: 40, y: 60, width: 520, height: 390, shape: 'rect', radius: 0 },
     { x: 40, y: 470, width: 520, height: 390, shape: 'rect', radius: 0 },
@@ -755,6 +756,15 @@ function validateLayout(layout) {
     }
     if (s.radius !== undefined && (!Number.isFinite(s.radius) || s.radius < 0)) {
       return `slot[${i}].radius must be a non-negative number`
+    }
+  }
+  if (layout.shotCount !== undefined) {
+    if (
+      !Number.isInteger(layout.shotCount) ||
+      layout.shotCount < layout.slots.length ||
+      layout.shotCount > 30
+    ) {
+      return `layout.shotCount must be an integer between slots length (${layout.slots.length}) and 30`
     }
   }
   return null

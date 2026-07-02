@@ -67,6 +67,7 @@ function toCategoryDto(row) {
     id: row.id,
     name: row.name,
     sortOrder: row.sort_order,
+    isBasic: row.is_basic,
     createdAt: row.created_at?.toISOString() ?? null,
     updatedAt: row.updated_at?.toISOString() ?? null,
   }
@@ -97,7 +98,7 @@ function toFrameDto(row) {
 gangminRouter.get('/frame-categories', async (_req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT id, name, sort_order, created_at, updated_at
+      `SELECT id, name, sort_order, is_basic, created_at, updated_at
        FROM frame_categories
        ORDER BY sort_order ASC, name ASC`,
     )
@@ -109,16 +110,16 @@ gangminRouter.get('/frame-categories', async (_req, res, next) => {
 
 gangminRouter.post('/frame-categories', async (req, res, next) => {
   try {
-    const { name, sortOrder } = req.body ?? {}
+    const { name, sortOrder, isBasic } = req.body ?? {}
     if (!isString(name)) return badRequest(res, 'name is required')
     const id = nanoid()
     const sortOrderNum = Number.isFinite(sortOrder) ? sortOrder : 0
 
     const { rows } = await query(
-      `INSERT INTO frame_categories (id, name, sort_order)
-       VALUES ($1, $2, $3)
-       RETURNING id, name, sort_order, created_at, updated_at`,
-      [id, name.trim(), sortOrderNum],
+      `INSERT INTO frame_categories (id, name, sort_order, is_basic)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, name, sort_order, is_basic, created_at, updated_at`,
+      [id, name.trim(), sortOrderNum, isBasic === true],
     )
     res.status(201).json(toCategoryDto(rows[0]))
   } catch (err) {
@@ -128,7 +129,7 @@ gangminRouter.post('/frame-categories', async (req, res, next) => {
 
 gangminRouter.patch('/frame-categories/:id', async (req, res, next) => {
   try {
-    const { name, sortOrder } = req.body ?? {}
+    const { name, sortOrder, isBasic } = req.body ?? {}
     const sets = []
     const params = []
     if (name !== undefined) {
@@ -141,6 +142,11 @@ gangminRouter.patch('/frame-categories/:id', async (req, res, next) => {
       params.push(sortOrder)
       sets.push(`sort_order = $${params.length}`)
     }
+    if (isBasic !== undefined) {
+      if (typeof isBasic !== 'boolean') return badRequest(res, 'invalid isBasic')
+      params.push(isBasic)
+      sets.push(`is_basic = $${params.length}`)
+    }
     if (sets.length === 0) return badRequest(res, 'no fields to update')
     sets.push('updated_at = now()')
     params.push(req.params.id)
@@ -149,7 +155,7 @@ gangminRouter.patch('/frame-categories/:id', async (req, res, next) => {
       `UPDATE frame_categories
        SET ${sets.join(', ')}
        WHERE id = $${params.length}
-       RETURNING id, name, sort_order, created_at, updated_at`,
+       RETURNING id, name, sort_order, is_basic, created_at, updated_at`,
       params,
     )
     if (rows.length === 0) return notFound(res)
@@ -173,6 +179,257 @@ gangminRouter.delete('/frame-categories/:id', async (req, res, next) => {
         .status(409)
         .json({ error: 'category has frames; remove or move them first' })
     }
+    next(err)
+  }
+})
+
+// ----- Basic layouts (색 없는 기본 규격) -----
+
+function toBasicLayoutDto(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    layout: row.layout,
+    footerText: row.footer_text,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at?.toISOString() ?? null,
+    updatedAt: row.updated_at?.toISOString() ?? null,
+  }
+}
+
+const BASIC_LAYOUT_COLS = `id, name, layout, footer_text, sort_order, created_at, updated_at`
+
+gangminRouter.get('/basic-layouts', async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT ${BASIC_LAYOUT_COLS} FROM basic_layouts
+       ORDER BY sort_order ASC, name ASC`,
+    )
+    res.json({ items: rows.map(toBasicLayoutDto) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.get('/basic-layouts/:id', async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT ${BASIC_LAYOUT_COLS} FROM basic_layouts WHERE id = $1`,
+      [req.params.id],
+    )
+    if (rows.length === 0) return notFound(res)
+    res.json(toBasicLayoutDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.post('/basic-layouts', async (req, res, next) => {
+  try {
+    const data = req.body ?? {}
+    if (!isString(data.name)) return badRequest(res, 'name is required')
+    const layoutError = validateLayout(data.layout)
+    if (layoutError) return badRequest(res, layoutError)
+    if (
+      data.footerText !== undefined &&
+      (typeof data.footerText !== 'string' || data.footerText.length > 200)
+    ) {
+      return badRequest(res, 'invalid footerText')
+    }
+    const id = nanoid()
+    const { rows } = await query(
+      `INSERT INTO basic_layouts (id, name, layout, footer_text, sort_order)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING ${BASIC_LAYOUT_COLS}`,
+      [
+        id,
+        data.name.trim(),
+        JSON.stringify(data.layout),
+        data.footerText ?? 'my-photobooth',
+        Number.isFinite(data.sortOrder) ? data.sortOrder : 0,
+      ],
+    )
+    res.status(201).json(toBasicLayoutDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.patch('/basic-layouts/:id', async (req, res, next) => {
+  try {
+    const data = req.body ?? {}
+    const sets = []
+    const params = []
+    const add = (col, val) => {
+      params.push(val)
+      sets.push(`${col} = $${params.length}`)
+    }
+    if (data.name !== undefined) {
+      if (!isString(data.name)) return badRequest(res, 'invalid name')
+      add('name', data.name.trim())
+    }
+    if (data.layout !== undefined) {
+      const layoutError = validateLayout(data.layout)
+      if (layoutError) return badRequest(res, layoutError)
+      add('layout', JSON.stringify(data.layout))
+    }
+    if (data.footerText !== undefined) {
+      if (typeof data.footerText !== 'string' || data.footerText.length > 200) {
+        return badRequest(res, 'invalid footerText')
+      }
+      add('footer_text', data.footerText)
+    }
+    if (data.sortOrder !== undefined) {
+      if (!Number.isFinite(data.sortOrder)) {
+        return badRequest(res, 'invalid sortOrder')
+      }
+      add('sort_order', data.sortOrder)
+    }
+    if (sets.length === 0) return badRequest(res, 'no fields to update')
+    sets.push('updated_at = now()')
+    params.push(req.params.id)
+
+    const { rows } = await query(
+      `UPDATE basic_layouts SET ${sets.join(', ')}
+       WHERE id = $${params.length}
+       RETURNING ${BASIC_LAYOUT_COLS}`,
+      params,
+    )
+    if (rows.length === 0) return notFound(res)
+    res.json(toBasicLayoutDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.delete('/basic-layouts/:id', async (req, res, next) => {
+  try {
+    const { rowCount } = await query(
+      `DELETE FROM basic_layouts WHERE id = $1`,
+      [req.params.id],
+    )
+    if (rowCount === 0) return notFound(res)
+    res.status(204).end()
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ----- Color chips (편집 단계 색 세트) -----
+
+function toColorChipDto(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    backgroundColor: row.background_color,
+    slotColor: row.slot_color,
+    textColor: row.text_color,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at?.toISOString() ?? null,
+    updatedAt: row.updated_at?.toISOString() ?? null,
+  }
+}
+
+const CHIP_COLS = `id, name, background_color, slot_color, text_color, sort_order, created_at, updated_at`
+
+function validateChip(data, { partial }) {
+  if (!partial || data.name !== undefined) {
+    if (!isString(data.name)) return 'invalid name'
+  }
+  for (const k of ['backgroundColor', 'slotColor', 'textColor']) {
+    if (!partial && data[k] === undefined) return `${k} is required`
+    if (data[k] !== undefined && !HEX_RE.test(data[k])) {
+      return `${k} must be #RRGGBB`
+    }
+  }
+  if (data.sortOrder !== undefined && !Number.isFinite(data.sortOrder)) {
+    return 'invalid sortOrder'
+  }
+  return null
+}
+
+gangminRouter.get('/color-chips', async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT ${CHIP_COLS} FROM color_chips ORDER BY sort_order ASC, name ASC`,
+    )
+    res.json({ items: rows.map(toColorChipDto) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.post('/color-chips', async (req, res, next) => {
+  try {
+    const data = req.body ?? {}
+    const err = validateChip(data, { partial: false })
+    if (err) return badRequest(res, err)
+    const id = nanoid()
+    const { rows } = await query(
+      `INSERT INTO color_chips
+         (id, name, background_color, slot_color, text_color, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING ${CHIP_COLS}`,
+      [
+        id,
+        data.name.trim(),
+        data.backgroundColor,
+        data.slotColor,
+        data.textColor,
+        Number.isFinite(data.sortOrder) ? data.sortOrder : 0,
+      ],
+    )
+    res.status(201).json(toColorChipDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.patch('/color-chips/:id', async (req, res, next) => {
+  try {
+    const data = req.body ?? {}
+    const verr = validateChip(data, { partial: true })
+    if (verr) return badRequest(res, verr)
+    const map = {
+      name: 'name',
+      backgroundColor: 'background_color',
+      slotColor: 'slot_color',
+      textColor: 'text_color',
+      sortOrder: 'sort_order',
+    }
+    const sets = []
+    const params = []
+    for (const [key, col] of Object.entries(map)) {
+      if (data[key] !== undefined) {
+        params.push(key === 'name' ? data[key].trim() : data[key])
+        sets.push(`${col} = $${params.length}`)
+      }
+    }
+    if (sets.length === 0) return badRequest(res, 'no fields to update')
+    sets.push('updated_at = now()')
+    params.push(req.params.id)
+    const { rows } = await query(
+      `UPDATE color_chips SET ${sets.join(', ')}
+       WHERE id = $${params.length}
+       RETURNING ${CHIP_COLS}`,
+      params,
+    )
+    if (rows.length === 0) return notFound(res)
+    res.json(toColorChipDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.delete('/color-chips/:id', async (req, res, next) => {
+  try {
+    const { rowCount } = await query(
+      `DELETE FROM color_chips WHERE id = $1`,
+      [req.params.id],
+    )
+    if (rowCount === 0) return notFound(res)
+    res.status(204).end()
+  } catch (err) {
     next(err)
   }
 })

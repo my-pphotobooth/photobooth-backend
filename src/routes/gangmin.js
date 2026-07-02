@@ -11,6 +11,19 @@ import { requireAdmin } from '../middleware/requireAdmin.js'
 
 export const gangminRouter = Router()
 
+// layout을 명시하지 않고 만든 프레임의 기본 규격(600x1900, 4슬롯).
+const DEFAULT_LAYOUT = {
+  canvas: { width: 600, height: 1900 },
+  slots: [
+    { x: 40, y: 60, width: 520, height: 390, shape: 'rect', radius: 0 },
+    { x: 40, y: 470, width: 520, height: 390, shape: 'rect', radius: 0 },
+    { x: 40, y: 880, width: 520, height: 390, shape: 'rect', radius: 0 },
+    { x: 40, y: 1290, width: 520, height: 390, shape: 'rect', radius: 0 },
+  ],
+}
+
+const SLOT_SHAPES = new Set(['rect', 'ellipse'])
+
 gangminRouter.post('/login', async (req, res) => {
   const { password } = req.body ?? {}
   if (!config.adminPassword || !config.jwtSecret) {
@@ -67,6 +80,8 @@ function toFrameDto(row) {
     textColor: row.text_color,
     slotColor: row.slot_color,
     footerText: row.footer_text,
+    layout: row.layout,
+    frameImageUrl: row.frame_image_url,
     overlays: row.overlays,
     availableFrom: row.available_from?.toISOString() ?? null,
     availableUntil: row.available_until?.toISOString() ?? null,
@@ -167,7 +182,7 @@ gangminRouter.get('/frames', async (_req, res, next) => {
   try {
     const { rows } = await query(
       `SELECT id, name, category_id, background_color, text_color, slot_color,
-              footer_text, overlays, available_from, available_until, sort_order, created_at, updated_at
+              footer_text, layout, frame_image_url, overlays, available_from, available_until, sort_order, created_at, updated_at
        FROM frames
        ORDER BY sort_order ASC, name ASC`,
     )
@@ -181,7 +196,7 @@ gangminRouter.get('/frames/:id', async (req, res, next) => {
   try {
     const { rows } = await query(
       `SELECT id, name, category_id, background_color, text_color, slot_color,
-              footer_text, overlays, available_from, available_until, sort_order, created_at, updated_at
+              footer_text, layout, frame_image_url, overlays, available_from, available_until, sort_order, created_at, updated_at
        FROM frames
        WHERE id = $1`,
       [req.params.id],
@@ -203,11 +218,11 @@ gangminRouter.post('/frames', async (req, res, next) => {
     const { rows } = await query(
       `INSERT INTO frames (
          id, name, category_id, background_color, text_color, slot_color, footer_text,
-         overlays, available_from, available_until, sort_order
+         overlays, available_from, available_until, sort_order, layout, frame_image_url
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id, name, category_id, background_color, text_color, slot_color,
-                 footer_text, overlays, available_from, available_until, sort_order, created_at, updated_at`,
+                 footer_text, layout, frame_image_url, overlays, available_from, available_until, sort_order, created_at, updated_at`,
       [
         id,
         data.name.trim(),
@@ -220,6 +235,8 @@ gangminRouter.post('/frames', async (req, res, next) => {
         v.availableFrom,
         v.availableUntil,
         Number.isFinite(data.sortOrder) ? data.sortOrder : 0,
+        JSON.stringify(v.layout ?? DEFAULT_LAYOUT),
+        data.frameImageUrl ?? null,
       ],
     )
     res.status(201).json(toFrameDto(rows[0]))
@@ -249,6 +266,10 @@ gangminRouter.patch('/frames/:id', async (req, res, next) => {
     if (data.textColor !== undefined) add('text_color', data.textColor)
     if (data.slotColor !== undefined) add('slot_color', data.slotColor)
     if (data.footerText !== undefined) add('footer_text', data.footerText)
+    if (data.layout !== undefined) add('layout', JSON.stringify(v.layout))
+    if (data.frameImageUrl !== undefined) {
+      add('frame_image_url', data.frameImageUrl)
+    }
     if (data.overlays !== undefined) {
       add('overlays', data.overlays === null ? null : JSON.stringify(data.overlays))
     }
@@ -264,7 +285,7 @@ gangminRouter.patch('/frames/:id', async (req, res, next) => {
        SET ${sets.join(', ')}
        WHERE id = $${params.length}
        RETURNING id, name, category_id, background_color, text_color, slot_color,
-                 footer_text, overlays, available_from, available_until, sort_order, created_at, updated_at`,
+                 footer_text, layout, frame_image_url, overlays, available_from, available_until, sort_order, created_at, updated_at`,
       params,
     )
     if (rows.length === 0) return notFound(res)
@@ -555,16 +576,20 @@ gangminRouter.delete('/tapes/:id', async (req, res, next) => {
 gangminRouter.post('/cleanup-uploads', async (_req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT overlays FROM frames WHERE overlays IS NOT NULL`,
+      `SELECT overlays, frame_image_url FROM frames`,
     )
 
     const used = new Set()
+    const markUsed = (src) => {
+      if (typeof src !== 'string') return
+      const m = src.match(/\/uploads\/(.+)$/)
+      if (m) used.add(m[1])
+    }
     for (const row of rows) {
+      markUsed(row.frame_image_url)
       if (!Array.isArray(row.overlays)) continue
       for (const o of row.overlays) {
-        if (typeof o?.src !== 'string') continue
-        const m = o.src.match(/\/uploads\/(.+)$/)
-        if (m) used.add(m[1])
+        markUsed(o?.src)
       }
     }
 
@@ -659,6 +684,21 @@ function validateFrame(data, { partial }) {
     }
   }
 
+  if (
+    data.frameImageUrl !== undefined &&
+    data.frameImageUrl !== null &&
+    !isString(data.frameImageUrl)
+  ) {
+    return { error: 'invalid frameImageUrl' }
+  }
+
+  let layout
+  if (data.layout !== undefined) {
+    const layoutError = validateLayout(data.layout)
+    if (layoutError) return { error: layoutError }
+    layout = data.layout
+  }
+
   let availableFrom = null
   let availableUntil = null
   try {
@@ -671,5 +711,51 @@ function validateFrame(data, { partial }) {
   } catch {
     return { error: 'invalid date' }
   }
-  return { availableFrom, availableUntil }
+  return { availableFrom, availableUntil, layout }
+}
+
+function validateLayout(layout) {
+  if (!layout || typeof layout !== 'object') {
+    return 'layout must be an object'
+  }
+  const c = layout.canvas
+  if (
+    !c ||
+    !Number.isFinite(c.width) ||
+    !Number.isFinite(c.height) ||
+    c.width <= 0 ||
+    c.height <= 0
+  ) {
+    return 'layout.canvas must have positive width/height'
+  }
+  if (!Array.isArray(layout.slots) || layout.slots.length < 1) {
+    return 'layout.slots must be a non-empty array'
+  }
+  for (let i = 0; i < layout.slots.length; i++) {
+    const s = layout.slots[i]
+    if (!s || typeof s !== 'object') return `slot[${i}] must be an object`
+    for (const k of ['x', 'y', 'width', 'height']) {
+      if (!Number.isFinite(s[k])) {
+        return `slot[${i}].${k} must be a finite number`
+      }
+    }
+    if (s.width <= 0 || s.height <= 0) {
+      return `slot[${i}] width/height must be > 0`
+    }
+    if (
+      s.x < 0 ||
+      s.y < 0 ||
+      s.x + s.width > c.width ||
+      s.y + s.height > c.height
+    ) {
+      return `slot[${i}] must be within the canvas`
+    }
+    if (s.shape !== undefined && !SLOT_SHAPES.has(s.shape)) {
+      return `slot[${i}].shape must be one of ${[...SLOT_SHAPES].join(', ')}`
+    }
+    if (s.radius !== undefined && (!Number.isFinite(s.radius) || s.radius < 0)) {
+      return `slot[${i}].radius must be a non-negative number`
+    }
+  }
+  return null
 }

@@ -13,6 +13,8 @@ function toFrameDto(row) {
     textColor: row.text_color,
     slotColor: row.slot_color,
     footerText: row.footer_text,
+    layout: row.layout,
+    frameImageUrl: row.frame_image_url,
     overlays: row.overlays,
     availableFrom: row.available_from?.toISOString() ?? null,
     availableUntil: row.available_until?.toISOString() ?? null,
@@ -45,7 +47,8 @@ framesRouter.get('/', async (_req, res, next) => {
   try {
     const { rows } = await query(
       `SELECT id, name, category_id, background_color, text_color, slot_color,
-              footer_text, overlays, available_from, available_until, sort_order
+              footer_text, layout, frame_image_url, overlays,
+              available_from, available_until, sort_order
        FROM frames
        WHERE (available_from IS NULL OR available_from <= now())
          AND (available_until IS NULL OR available_until >= now())

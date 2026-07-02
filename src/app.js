@@ -9,7 +9,7 @@ import {
   basicLayoutsRouter,
   colorChipsRouter,
 } from './routes/basicFrames.js'
-import { tapesRouter } from './routes/tapes.js'
+import { tapesRouter, tapeCategoriesRouter } from './routes/tapes.js'
 import { gangminRouter } from './routes/gangmin.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { query } from './db/pool.js'
@@ -63,6 +63,7 @@ export function createApp() {
   app.use('/api/basic-layouts', basicLayoutsRouter)
   app.use('/api/color-chips', colorChipsRouter)
   app.use('/api/tapes', tapesRouter)
+  app.use('/api/tape-categories', tapeCategoriesRouter)
   app.use('/api/gangmin/login', loginLimiter)
   app.use('/api/gangmin', gangminRouter)
 

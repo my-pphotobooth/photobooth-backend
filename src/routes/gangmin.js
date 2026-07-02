@@ -682,6 +682,7 @@ function toTapeDto(row) {
     name: row.name,
     url: storage.getUrl(row.filename),
     filename: row.filename,
+    categoryId: row.category_id,
     active: row.active,
     sortOrder: row.sort_order,
     createdAt: row.created_at?.toISOString() ?? null,
@@ -692,7 +693,7 @@ function toTapeDto(row) {
 gangminRouter.get('/tapes', async (_req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT id, name, filename, active, sort_order, created_at, updated_at
+      `SELECT id, name, filename, category_id, active, sort_order, created_at, updated_at
        FROM tapes
        ORDER BY sort_order ASC, name ASC`,
     )
@@ -705,8 +706,9 @@ gangminRouter.get('/tapes', async (_req, res, next) => {
 gangminRouter.post('/tapes', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return badRequest(res, 'file is required')
-    const { name, sortOrder, active } = req.body ?? {}
+    const { name, sortOrder, active, categoryId } = req.body ?? {}
     if (!isString(name)) return badRequest(res, 'name is required')
+    if (!isString(categoryId)) return badRequest(res, 'categoryId is required')
 
     const sortOrderNum = sortOrder !== undefined ? Number(sortOrder) : 0
     if (!Number.isFinite(sortOrderNum)) return badRequest(res, 'invalid sortOrder')
@@ -720,10 +722,10 @@ gangminRouter.post('/tapes', upload.single('file'), async (req, res, next) => {
 
     try {
       const { rows } = await query(
-        `INSERT INTO tapes (id, name, filename, active, sort_order)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, filename, active, sort_order, created_at, updated_at`,
-        [id, name.trim(), filename, activeBool, sortOrderNum],
+        `INSERT INTO tapes (id, name, filename, active, sort_order, category_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, filename, category_id, active, sort_order, created_at, updated_at`,
+        [id, name.trim(), filename, activeBool, sortOrderNum, categoryId],
       )
       res.status(201).json(toTapeDto(rows[0]))
     } catch (err) {
@@ -731,6 +733,7 @@ gangminRouter.post('/tapes', upload.single('file'), async (req, res, next) => {
       throw err
     }
   } catch (err) {
+    if (err.code === '23503') return badRequest(res, 'invalid categoryId')
     next(err)
   }
 })
@@ -738,7 +741,7 @@ gangminRouter.post('/tapes', upload.single('file'), async (req, res, next) => {
 gangminRouter.patch('/tapes/:id', upload.single('file'), async (req, res, next) => {
   let newFilename = null
   try {
-    const { name, sortOrder, active } = req.body ?? {}
+    const { name, sortOrder, active, categoryId } = req.body ?? {}
     const sets = []
     const params = []
 
@@ -746,6 +749,11 @@ gangminRouter.patch('/tapes/:id', upload.single('file'), async (req, res, next) 
       if (!isString(name)) return badRequest(res, 'invalid name')
       params.push(name.trim())
       sets.push(`name = $${params.length}`)
+    }
+    if (categoryId !== undefined) {
+      if (!isString(categoryId)) return badRequest(res, 'invalid categoryId')
+      params.push(categoryId)
+      sets.push(`category_id = $${params.length}`)
     }
     if (sortOrder !== undefined) {
       const n = Number(sortOrder)
@@ -785,7 +793,7 @@ gangminRouter.patch('/tapes/:id', upload.single('file'), async (req, res, next) 
       `UPDATE tapes
        SET ${sets.join(', ')}
        WHERE id = $${params.length}
-       RETURNING id, name, filename, active, sort_order, created_at, updated_at`,
+       RETURNING id, name, filename, category_id, active, sort_order, created_at, updated_at`,
       params,
     )
     if (rows.length === 0) {
@@ -806,6 +814,7 @@ gangminRouter.patch('/tapes/:id', upload.single('file'), async (req, res, next) 
     if (newFilename) {
       try { await storage.delete(newFilename) } catch { /* ignore */ }
     }
+    if (err.code === '23503') return badRequest(res, 'invalid categoryId')
     next(err)
   }
 })
@@ -825,6 +834,98 @@ gangminRouter.delete('/tapes/:id', async (req, res, next) => {
     }
     res.status(204).end()
   } catch (err) {
+    next(err)
+  }
+})
+
+// ----- Tape categories -----
+
+function toTapeCategoryDto(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at?.toISOString() ?? null,
+    updatedAt: row.updated_at?.toISOString() ?? null,
+  }
+}
+
+const TAPE_CAT_COLS = `id, name, sort_order, created_at, updated_at`
+
+gangminRouter.get('/tape-categories', async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT ${TAPE_CAT_COLS} FROM tape_categories
+       ORDER BY sort_order ASC, name ASC`,
+    )
+    res.json({ items: rows.map(toTapeCategoryDto) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.post('/tape-categories', async (req, res, next) => {
+  try {
+    const { name, sortOrder } = req.body ?? {}
+    if (!isString(name)) return badRequest(res, 'name is required')
+    const id = nanoid()
+    const { rows } = await query(
+      `INSERT INTO tape_categories (id, name, sort_order)
+       VALUES ($1, $2, $3)
+       RETURNING ${TAPE_CAT_COLS}`,
+      [id, name.trim(), Number.isFinite(sortOrder) ? sortOrder : 0],
+    )
+    res.status(201).json(toTapeCategoryDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.patch('/tape-categories/:id', async (req, res, next) => {
+  try {
+    const { name, sortOrder } = req.body ?? {}
+    const sets = []
+    const params = []
+    if (name !== undefined) {
+      if (!isString(name)) return badRequest(res, 'invalid name')
+      params.push(name.trim())
+      sets.push(`name = $${params.length}`)
+    }
+    if (sortOrder !== undefined) {
+      if (!Number.isFinite(sortOrder)) return badRequest(res, 'invalid sortOrder')
+      params.push(sortOrder)
+      sets.push(`sort_order = $${params.length}`)
+    }
+    if (sets.length === 0) return badRequest(res, 'no fields to update')
+    sets.push('updated_at = now()')
+    params.push(req.params.id)
+    const { rows } = await query(
+      `UPDATE tape_categories SET ${sets.join(', ')}
+       WHERE id = $${params.length}
+       RETURNING ${TAPE_CAT_COLS}`,
+      params,
+    )
+    if (rows.length === 0) return notFound(res)
+    res.json(toTapeCategoryDto(rows[0]))
+  } catch (err) {
+    next(err)
+  }
+})
+
+gangminRouter.delete('/tape-categories/:id', async (req, res, next) => {
+  try {
+    const { rowCount } = await query(
+      `DELETE FROM tape_categories WHERE id = $1`,
+      [req.params.id],
+    )
+    if (rowCount === 0) return notFound(res)
+    res.status(204).end()
+  } catch (err) {
+    if (err.code === '23503') {
+      return res
+        .status(409)
+        .json({ error: 'category has tapes; remove or move them first' })
+    }
     next(err)
   }
 })

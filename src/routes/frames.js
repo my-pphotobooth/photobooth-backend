@@ -27,13 +27,14 @@ function toCategoryDto(row) {
     id: row.id,
     name: row.name,
     sortOrder: row.sort_order,
+    isBasic: row.is_basic,
   }
 }
 
 frameCategoriesRouter.get('/', async (_req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT id, name, sort_order
+      `SELECT id, name, sort_order, is_basic
        FROM frame_categories
        ORDER BY sort_order ASC, name ASC`,
     )

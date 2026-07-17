@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid'
 import { query } from '../db/pool.js'
 import { storage } from '../storage/index.js'
 import { upload } from '../middleware/upload.js'
+import { notifyNewPhoto } from '../notify.js'
 
 export const photosRouter = Router()
 
@@ -42,7 +43,9 @@ photosRouter.post('/', upload.single('file'), async (req, res, next) => {
                    NULL::text AS tape_name, NULL::text AS tape_filename`,
         [id, filename, req.file.mimetype, sizeBytes, frameId, tapeId],
       )
-      res.status(201).json(toDto(rows[0]))
+      const dto = toDto(rows[0])
+      res.status(201).json(dto)
+      notifyNewPhoto(dto.url) // 텔레그램 알림 (fire-and-forget)
     } catch (err) {
       if (err.code === '23503') {
         await storage.delete(filename)

@@ -21,4 +21,8 @@ export const config = {
     s3Bucket: process.env.S3_BUCKET ?? null,
     s3PublicBaseUrl: process.env.S3_PUBLIC_BASE_URL ?? null,
   },
+  telegram: {
+    botToken: process.env.TELEGRAM_BOT_TOKEN ?? null,
+    chatId: process.env.TELEGRAM_CHAT_ID ?? null,
+  },
 }

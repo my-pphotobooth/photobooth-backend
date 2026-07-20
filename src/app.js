@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
+import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { config } from './config.js'
 import { photosRouter } from './routes/photos.js'
@@ -19,12 +20,15 @@ export function createApp() {
 
   app.set('trust proxy', 1)
 
+  const uploadDir = path.resolve(config.uploadDir)
+  mkdirSync(uploadDir, { recursive: true })
+
   app.use(cors({ origin: config.corsOrigin }))
   app.use(express.json())
 
   app.use(
     '/uploads',
-    express.static(path.resolve(config.uploadDir), {
+    express.static(uploadDir, {
       index: false,
       fallthrough: false,
     }),

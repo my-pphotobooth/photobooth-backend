@@ -34,7 +34,7 @@ UPDATE frame_categories SET is_basic = true WHERE id = 'basic';
 
 -- 규격 3종 시드
 INSERT INTO basic_layouts (id, name, layout, footer_text, sort_order) VALUES
-  ('strip-4', '세로 4컷', '{
+  ('strip-4', '말랭이', '{
     "canvas": { "width": 600, "height": 1900 },
     "shotCount": 8,
     "slots": [
@@ -44,23 +44,23 @@ INSERT INTO basic_layouts (id, name, layout, footer_text, sort_order) VALUES
       { "x": 40, "y": 1290, "width": 520, "height": 390, "shape": "rect", "radius": 0 }
     ]
   }'::jsonb, 'my-photobooth', 0),
-  ('grid-4', '2단 4컷', '{
+  ('grid-4', '뚱땡이', '{
     "canvas": { "width": 1200, "height": 1900 },
     "shotCount": 8,
     "slots": [
       { "x": 45,  "y": 210, "width": 545, "height": 730, "shape": "rect", "radius": 0 },
-      { "x": 45,  "y": 960, "width": 545, "height": 730, "shape": "rect", "radius": 0 },
       { "x": 610, "y": 210, "width": 545, "height": 730, "shape": "rect", "radius": 0 },
+      { "x": 45,  "y": 960, "width": 545, "height": 730, "shape": "rect", "radius": 0 },
       { "x": 610, "y": 960, "width": 545, "height": 730, "shape": "rect", "radius": 0 }
     ]
   }'::jsonb, 'my-photobooth', 1),
-  ('grid-4-offset', '2단 엇갈림', '{
+  ('grid-4-offset', '삐뚤 뚱땡이', '{
     "canvas": { "width": 1200, "height": 1900 },
     "shotCount": 8,
     "slots": [
       { "x": 45,  "y": 270,  "width": 545, "height": 730, "shape": "rect", "radius": 0 },
-      { "x": 45,  "y": 1020, "width": 545, "height": 730, "shape": "rect", "radius": 0 },
       { "x": 610, "y": 151,  "width": 545, "height": 730, "shape": "rect", "radius": 0 },
+      { "x": 45,  "y": 1020, "width": 545, "height": 730, "shape": "rect", "radius": 0 },
       { "x": 610, "y": 901,  "width": 545, "height": 730, "shape": "rect", "radius": 0 }
     ]
   }'::jsonb, 'my-photobooth', 2);

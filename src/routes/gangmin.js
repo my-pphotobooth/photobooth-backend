@@ -1035,6 +1035,20 @@ function validateFrame(data, { partial }) {
       if (typeof o.src !== 'string' || o.src.length === 0) {
         return { error: `overlay[${i}].src must be a non-empty string` }
       }
+      if (o.anchor !== undefined && o.anchor !== 'slot' && o.anchor !== 'canvas') {
+        return { error: `overlay[${i}].anchor must be "slot" or "canvas"` }
+      }
+      if (o.clip !== undefined && typeof o.clip !== 'boolean') {
+        return { error: `overlay[${i}].clip must be a boolean` }
+      }
+      // 구버전 오버레이는 shotIndex가 없고 배열 인덱스가 곧 샷 번호다.
+      if (
+        o.shotIndex !== undefined &&
+        o.shotIndex !== null &&
+        (!Number.isInteger(o.shotIndex) || o.shotIndex < 0)
+      ) {
+        return { error: `overlay[${i}].shotIndex must be a non-negative integer or null` }
+      }
       for (const k of ['right', 'bottom', 'height']) {
         if (typeof o[k] !== 'number' || !Number.isFinite(o[k])) {
           return { error: `overlay[${i}].${k} must be a finite number` }
